@@ -1,6 +1,6 @@
 pragma solidity >=0.7.0 <0.8.0; 
 
-
+// Creates a library of functions to be used by the ColdChain contract.
 library CryptoSuite {
     function splitSignature(bytes memory sig) internal pure returns(uint8 v, bytes32 r, bytes32 s) {
         require(sig.length == 65);
@@ -35,7 +35,7 @@ contract ColdChain {
         uint[] certificateIds;
     }
 
-    enum CertificateStatus {MANUFACTURED, DELIVERING_INTERNATIONAL, STORED, DELIVERING_LOCAL, DELIVERED}
+    enum Status { MANUFACTURED, DELIVERING_INTERNATIONAL, STORED, DELIVERING_LOCAL, DELIVERED }
 
     struct Certificate {
         uint id;
@@ -94,32 +94,75 @@ contract ColdChain {
 
     }
 
-    function AddVaccineBatch(string memory brand, address manufacturer) public {
-        Mode mode = unmarshalMode(brand);
+    function AddVaccineBatch(string memory brand, address manufacturer) public returns(uint) {
         uint[] memory _certificateId = new uint[](MAX_CERTIFICATIONS);
-        Entity memory entity = Entity(_id, mode, _certificateIds);
-        entities[_id] = entity;
+        uint id = vaccineBatchIds.length;
+        VaccineBatch memory batch = VaccineBatch(id, brand, manufacturer, _certificateIds);
 
-        emit AddEntity(entity.id, brand)
+        vaccineBatches[id] = batch;
+        vaccineBatchIds.push(id);
+
+        emit AddVaccineBatch(batch.id, batch.manufacturer);
+        return id
     }
 
-    function unmarshalMode(string memory brand) private pure returns(Mode mode){
-        bytes32 encodedMode = keccak256(abi.encodePacked(brand));
-        bytes32 encodedMode0 = keccak256(abi.encodePacked("ISSUER"));
-        bytes32 encodedMode1 = keccak256(abi.encodePacked("PROVER"));
-        bytes32 encodedMode2 = keccak256(abi.encodePacked("VERIFIER"));
+     function unmarshalStatus(string memory _status) private pure returns(Status status){
+        bytes32 encodedStatus = keccak256(abi.encodePacked(_status));
+        bytes32 encodedStatus0 = keccak256(abi.encodePacked("MANUFACTURED"));
+        bytes32 encodedStatus1 = keccak256(abi.encodePacked("DELIVERING_INTERNATIONAL"));
+        bytes32 encodedStatus2 = keccak256(abi.encodePacked("STORED"));
+        bytes32 encodedStatus3 = keccak256(abi.encodePacked("DELIVERING_LOCAL"));
+        bytes32 encodedStatus4 = keccak256(abi.encodePacked("DELIVERED"));
 
-        if(encodedMode == encodedMode0){
-            return Mode.ISSUER;
+        if(encodedStatus == encodedStatus0){
+            return Status.MANUFACTURED;
         }
-        else if (encodedMode == encodedMode1){
-            return Mode.PROVER;
+        else if (encodedStatus == encodedStatus1){
+            return Status.DELIVERING_INTERNATIONAL;
         }
-        else if (encodedMode == encodedMode2){
-            return Mode.VERIFIER;
+        else if (encodedStatus == encodedStatus2){
+            return Status.STORED;
+        }
+         else if (encodedStatus == encodedStatus3){
+            return Status.DELIVERING_LOCAL;
+        }
+         else if (encodedStatus == encodedStatus4){
+            return Status.DELIVERED;
         }
 
-        revert("receive an invalid entity mode")
+        revert("receive an invalid Status")
 
+    }
+    
+    function issueCertificate(address _issuer, address _prover, string memory _status, uint vaccineBatchId, bytes memory signature) public returns(uint){
+        Entity memory issuer = entities[_issuer];
+        require(issuer.mode == Mode.ISSUER);
+
+        Entity memory prover = entities[_prover];
+        require(prover.mode == Mode.PROVER);
+
+        Status status = unmarshalStatus(_status);
+
+        uint id = certificateIds.length;
+        Certificate memory certificate = Certificate(id, issuer, prover, signature, status);
+
+        certificateIds.push(certificateIds.length);
+        certificates[certificateIds.length-1] = certificate;
+
+        emit IssueCertificate(_issuer, _prover, certificateIds.length-1)
+
+        return certificateIds.length-1;
+
+        }
+
+    }
+
+    function isMatchingSignature(bytes32 message, uint id, address issuer) public view returns(bool) {
+        Certificate memory cert = certificates[id];
+        receive(cert.issuer.id == issuer);
+
+        address recoverSigner = CryptoSuite.recoverSigner(message, cert.signature);
+
+        return recoverSigner == cert.issuer.id;
     }
 }
